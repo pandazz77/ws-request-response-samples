@@ -45,7 +45,7 @@ class UDPclient(threading.Thread):
 
 class UDPRequestClient(UDPclient):
     def __init__(self,port:int,address:str="localhost",handler=None):
-        super().__init__(port,address,input_handler=self.input_handler)
+        super().__init__(port,address,input_handler=self._input_handler)
         
         if handler is None: self.handler = self._echo
         else: self.handler = handler
@@ -65,7 +65,7 @@ class UDPRequestClient(UDPclient):
 
         return msg
 
-    def input_handler(self,data:str,addr:tuple):
+    def _input_handler(self,data:str,addr:tuple):
         data = json.loads(data)
         if REQUEST_ID_FIELD not in data: raise Exception("Invalid body(doesnt contain id):",data)
         if REQUEST_TYPE_FIELD not in data: raise Exception("Invalid body(doesnt contain type):",data)
@@ -88,9 +88,9 @@ class UDPRequestClient(UDPclient):
             raise Exception("Response is not response :)")
         
     def _send_response(self,data:dict,addr:tuple):
-        self.handled_data = self.handler(data)
-        if self.handled_data is None: return
-        self.send(json.dumps(self.handled_data),addr[1],addr[0])
+        handled_data = self.handler(data)
+        if handled_data is None: return
+        self.send(json.dumps(handled_data),addr[1],addr[0])
 
     def _echo(self,data:dict) -> dict:
         return data
