@@ -6,39 +6,28 @@ REQUEST_REQVAL = "REQUEST"
 REQUEST_RESVAL = "RESPONSE"
 REQUEST_ID_LENGTH = 10
 
-# request echo
-async def _r_echo(data:dict) -> dict:
-    return data
-
 # random string generator
 def rstr(N:int):
     return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(N))
 
-# Simple websocket handler function
-async def _echo(websocket, path):
-    async for message in websocket:
-        print("Received:",message)
-        await websocket.send(message)
-        print("Sent:",message)
-
 
 # Simple websocket server
 class WebsocketServer:
-    def __init__(self,addr:str,port:int,handler):
+    def __init__(self,addr:str,port:int,ahandler):
         self.addr = addr
         self.port = port
-        self.handler = handler
+        self.ahandler = ahandler
 
-    async def run(self):
-        async with websockets.serve(self.handler, self.addr, self.port) as server:
-            await asyncio.Future()
+    async def listen(self):
+        async with websockets.serve(self.ahandler, self.addr, self.port) as server:
+            await server.serve_forever()
 
     async def send(self, data, websocket):
         await websocket.send(data)
 
 # Simple websocket client
 class WebSocketClient:
-    def __init__(self,uri:str=None,wss_addr:str=None,wss_port:int=None):
+    def __init__(self,uri:str=None,wss_addr:str=None,wss_port:int=None,ahandler=None):
         if uri is not None:
             self.uri = uri
         else:
@@ -47,6 +36,11 @@ class WebSocketClient:
             self.uri = f"ws://{wss_addr}:{wss_port}"
 
         self.websocket: None
+        self.ahandler = ahandler
+
+    async def listen(self):
+        while True:
+            await self.ahandler(await self.recv())
 
     async def connect(self):
         self.websocket = await websockets.connect(self.uri)
@@ -69,9 +63,9 @@ class WebSocketClient:
 
 
 class RequestWebSocketServer(WebsocketServer):
-    def __init__(self,addr:str,port:int,handler):
+    def __init__(self,addr:str,port:int,arhandler):
         super().__init__(addr,port,self._input_handler)
-        self.handler = handler # мб будет ошибка из-за одного имени с родителем
+        self.arhandler = arhandler # мб будет ошибка из-за одного имени с родителем
 
         self.incoming_messages = {}
 
@@ -95,7 +89,7 @@ class RequestWebSocketServer(WebsocketServer):
             if REQUEST_TYPE_FIELD not in message: raise Exception("Invalid body(doesnt contain type):",message)
             self.incoming_messages[message[REQUEST_ID_FIELD]] = message
             message = self.wrap_message(message,False)
-            self._send_response(message,websocket)
+            await self._send_response(message,websocket)
 
     async def send_request(self,data:dict,websocket):
         wrapped_msg = self.wrap_message(data)
@@ -111,21 +105,17 @@ class RequestWebSocketServer(WebsocketServer):
             raise Exception("Response is not response :)")
 
     async def _send_response(self,data:dict,websocket):
-        handled_data = self.handler(data)
+        handled_data = await self.arhandler(data)
         if handled_data is None: return
-        self.send(handled_data,websocket)
+        await self.send(json.dumps(handled_data),websocket)
 
 
 class RequestWebSocketClient(WebSocketClient):
-    def __init__(self,uri:str=None,wss_addr:str=None,wss_port:int=None,handler=None):
-        super().__init__(uri,wss_addr,wss_port)
-        self.handler = handler
+    def __init__(self,uri:str=None,wss_addr:str=None,wss_port:int=None,arhandler=None):
+        super().__init__(uri,wss_addr,wss_port,self._input_handler)
+        self.arhandler = arhandler
 
         self.incoming_messages = {}
-
-    async def run(self):
-        while True:
-            await self._input_handler(await self.recv())
 
     async def _input_handler(self,message):
         message = json.loads(message)
@@ -133,13 +123,13 @@ class RequestWebSocketClient(WebSocketClient):
         if REQUEST_TYPE_FIELD not in message: raise Exception("Invalid body(doesnt contain type):",message)
         self.incoming_messages[message[REQUEST_ID_FIELD]] = message
         message = RequestWebSocketServer.wrap_message(message,False)
-        self._send_response(message)
+        await self._send_response(message)
 
     async def send_request(self, data:dict):
         wrapped_msg = RequestWebSocketServer.wrap_message(data)
         id = wrapped_msg.get(REQUEST_ID_FIELD)
 
-        self.send(json.dumps(wrapped_msg))
+        await self.send(json.dumps(wrapped_msg))
         while id not in self.incoming_messages:
             await asyncio.sleep(0.1)
         response = self.incoming_messages.pop(id)
@@ -149,6 +139,6 @@ class RequestWebSocketClient(WebSocketClient):
             raise Exception("Response is not response :)")
         
     async def _send_response(self,data:dict):
-        handled_data = self.handler(data)
-        if handled_data is None: return
-        return await self.send(handled_data)
+        handled_data = await self.arhandler(data)
+        if handled_data is not None:
+            await self.send(handled_data)
