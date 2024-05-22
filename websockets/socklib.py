@@ -20,6 +20,7 @@ class WebsocketServer:
 
     async def listen(self):
         async with websockets.serve(self.ahandler, self.addr, self.port) as server:
+            print("WS server listening on",self.addr, self.port)
             await server.serve_forever()
 
     async def send(self, data, websocket):

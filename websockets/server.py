@@ -12,7 +12,6 @@ async def echo(websocket):
 
 # request echo
 async def r_echo(data:dict) -> dict:
-    print("Received:",data)
     print("Sent:",data)
     return data
 
